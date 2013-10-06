@@ -69,19 +69,17 @@ char ***tokenify(const char *str, int cmds) {
 int main(int argc, char **argv) {
 	char prompt[3] = "$$ ";
 	char buffer[1024];
-	int i;
-	int cmds = 0;
-	char ***cmdtoks;
 
 	printf("%s", prompt);
 	fflush(stdout);
 
 	while (fgets(buffer, 1024, stdin) != NULL) {
-		fgets(buffer, 1024, stdin);
-		// 1. count the number of commands and locate any comments
-		cmds = 1;
-		i=0;
+		// count the number of commands and locate any comments
+		int cmds = 1;
+		int i=0;
 		for (; i<1024; i++) {
+			if ( buffer[i] == (int)'\0' )
+				break;
 			if ( buffer[i] == (int)';' )
 				cmds++;
 			if ( buffer[i] == (int)'#' ) {
@@ -90,30 +88,49 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		// 2. tokenize commands and organize into array of array of pointers
-		cmdtoks = tokenify(&buffer, cmds);
+		// tokenize commands and organize into array of array of pointers
+		char ***cmdtoks = tokenify(&buffer, cmds);
 		i=0;
+		int j=0;
 		for (; i < cmds; i++) {
 			printf("Command %i:\n", i);
-			int j=0;
+			j=0;
 			while ( cmdtoks[i][j] != NULL ) {
 				printf("%s\n", cmdtoks[i][j]);
 				j++;
 			}
 		}
 
-		// 3. begin executing commands
+		// begin executing commands
+		i=0;
+		j=0;
+		int exit=0;
+		while (cmdtoks[i]!=NULL) {
+			if(strcmp(cmdtoks[i][0],"exit")==0)
+				exit=1;
+			i++;
+		}
+		if (exit==1)
+			break;
 
-
-
+		// eliminate memory leaks
+		i=0;
+		j=0;
+		while (cmdtoks[i]!=NULL) {
+			while (cmdtoks[i][j]!=NULL) {
+				free(cmdtoks[i][j]);
+				j++;
+			}
+			free(cmdtoks[i]);
+			i++;
+		}
+		free(cmdtoks);
 
 		printf("%s",prompt);
 		fflush(stdout);
 
 	}
 
-	i=0;
-	free(cmdtoks);
     	return 0;
 }
 

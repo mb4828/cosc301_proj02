@@ -10,6 +10,12 @@
 #include <sys/stat.h>
 #include <poll.h>
 #include <signal.h>
+#include <errno.h>
+
+struct node {
+	char *name;
+	struct node *next;
+};
 
 char **tok_helper(const char *str) {
         // pass 1: count number of tokens
@@ -66,17 +72,49 @@ char ***tokenify(const char *str, int cmds) {
 	return cmdtokens;
 }
 
-int main(int argc, char **argv) {
-	char prompt[3] = "$$ ";
-	char buffer[1024];
+char *strip(char *str) {
+	// need to strip the newline character from the end of string
+	int len = strlen(str);
+	if (str[len-1] == (int)'\n')
+		str[len-1] = '\0';
+	return str;
+	printf("\n%s\n",str);
+}
 
-	printf("%s", prompt);
+int main(int argc, char **argv) {
+	char buffer[1024];
+	int par=0;
+	int p_running=0;
+	int childrv;
+
+        // read shell-config
+        FILE *configfile = fopen("shell-config","r");
+        struct node *head = NULL;
+	struct node *tmp;
+
+	if (configfile != NULL) {
+                char filebuffer[256];
+                head = (struct node*) malloc(sizeof(struct node));
+                head->name = strdup(strip(fgets(filebuffer, 256, configfile)));
+                head->next = NULL;
+
+                while (fgets(filebuffer, 256, configfile) != NULL) {
+                        tmp = (struct node*) malloc(sizeof(struct node));
+                        tmp->name = strip(strdup(filebuffer));
+                        tmp->next = head;
+                        head = tmp;
+                }
+        }
+
+	printf("$$ ");
 	fflush(stdout);
 
 	while (fgets(buffer, 1024, stdin) != NULL) {
+		int cmds, i, j;
+
 		// count the number of commands and locate any comments
-		int cmds = 1;
-		int i=0;
+		cmds=1;
+		i=0;
 		for (; i<1024; i++) {
 			if ( buffer[i] == (int)'\0' )
 				break;
@@ -90,8 +128,9 @@ int main(int argc, char **argv) {
 
 		// tokenize commands and organize into array of array of pointers
 		char ***cmdtoks = tokenify(&buffer, cmds);
-		i=0;
-		int j=0;
+		/*
+		// diagnostic tool for printing the command token array
+		i=0;j=0;
 		for (; i < cmds; i++) {
 			printf("Command %i:\n", i);
 			j=0;
@@ -100,22 +139,113 @@ int main(int argc, char **argv) {
 				j++;
 			}
 		}
+		*/
 
 		// begin executing commands
-		i=0;
-		j=0;
+		i=0; j=0;
 		int exit=0;
+		pid_t pid=1;
+
 		while (cmdtoks[i]!=NULL) {
-			if(strcmp(cmdtoks[i][0],"exit")==0)
-				exit=1;
+			if (cmdtoks[i][0]==NULL)
+				break;
+
+			// handle EOF
+			if (cmdtoks[i][0][0]==4) {
+				printf("\n");
+				break;
+			}
+
+			// handle mode command
+			if (strcmp(cmdtoks[i][0],"mode")==0) {
+				if (cmdtoks[i][1] == NULL) {
+					if (par) {
+						printf("current mode: parallel\n");
+					} else {
+						printf("current mode: sequential\n");
+					}
+				} else if (cmdtoks[i][2] == NULL) {
+					if (strcmp(cmdtoks[i][1], "sequential")==0 || strcmp(cmdtoks[i][1], "s")==0) {
+						if (par==1) {
+							// wait for currently running processes to finish so we can start executing sequentially
+                                                	while (p_running > 0) {
+                                				waitpid(-1, &childrv, 0);
+                               					p_running--;
+				                        }
+						}
+						par=0;
+					} else if (strcmp(cmdtoks[i][1], "parallel")==0 || strcmp(cmdtoks[i][1], "p")==0) {
+						par=1;
+					} else {
+						fprintf(stderr,"mode error: invalid command. invalid mode parameter specified\n");
+					}
+				} else {
+					fprintf(stderr,"mode error: invalid command. mode does not take more than one parameter\n");
+				}
+			}
+
+			// handle exit command
+			else if(strcmp(cmdtoks[i][0],"exit")==0) {
+				if (cmdtoks[i][1] == NULL) {
+					exit=1;
+					if (!par)
+						break;
+				} else {
+					fprintf(stderr,"exit error: invalid command. exit does not take any parameters\n");
+				}
+			}
+
+			// handle commands
+			else {
+				pid = fork();
+				p_running++;
+
+				if (pid==0) {
+					int skip=0;
+					tmp = head;
+					while (tmp!=NULL) {
+						int size = strlen(tmp->name)+strlen(cmdtoks[i][0]);
+						char *path = (char*) malloc(size);
+						strcpy(path, tmp->name);
+						strcat(path, "/");
+						strcat(path, cmdtoks[i][0]);
+
+						if (execv(path, cmdtoks[i]) != -1){
+							skip=1;
+							break;
+						}
+
+						free(path);
+						tmp = tmp->next;
+					}
+					if (!skip) {
+						if (execv(cmdtoks[i][0], cmdtoks[i]) < 0) {
+							fprintf(stderr, "execv failed: %s\n", strerror(errno));
+						}
+					}
+					return 0;
+				} else {
+					if (!par) {
+						// wait for processes to finish in sequential mode
+                                                waitpid(pid, &childrv, 0);
+						p_running--;
+					}
+				}
+			}
+
 			i++;
 		}
-		if (exit==1)
-			break;
 
-		// eliminate memory leaks
-		i=0;
-		j=0;
+		if (par) {
+			// wait for processes to finish in parallel mode
+			while (p_running > 0) {
+				waitpid(-1, &childrv, 0);
+				p_running--;
+			}
+		}
+
+		// free heap memory
+		i=0; j=0;
 		while (cmdtoks[i]!=NULL) {
 			while (cmdtoks[i][j]!=NULL) {
 				free(cmdtoks[i][j]);
@@ -126,9 +256,19 @@ int main(int argc, char **argv) {
 		}
 		free(cmdtoks);
 
-		printf("%s",prompt);
+		if (exit)
+			break;
+
+		printf("$$ ");
 		fflush(stdout);
 
+	}
+
+	// free more heap memory
+	while (head!=NULL) {
+		tmp = head;
+		head = head->next;
+		free(tmp);
 	}
 
     	return 0;

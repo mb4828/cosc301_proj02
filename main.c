@@ -62,6 +62,9 @@ char ***tokenify(const char *str, int cmds) {
 		if (word != NULL) {
 			// tokenize and add to array
 			cmdtokens[i] = tok_helper(word);
+		} else {
+			cmdtokens[i] = (char**)malloc(sizeof(char*));
+			cmdtokens[i][0] = '\0';
 		}
 		// get a new "big" token
 		word = strtok_r(NULL, sep, &tmp);
@@ -86,6 +89,8 @@ int main(int argc, char **argv) {
 	int par=0;
 	int p_running=0;
 	int childrv;
+	int exit=0;
+	pid_t pid=1;
 
         // read shell-config
         FILE *configfile = fopen("shell-config","r");
@@ -105,6 +110,8 @@ int main(int argc, char **argv) {
                         head = tmp;
                 }
         }
+
+	fclose(configfile);
 
 	printf("$$ ");
 	fflush(stdout);
@@ -128,6 +135,7 @@ int main(int argc, char **argv) {
 
 		// tokenize commands and organize into array of array of pointers
 		char ***cmdtoks = tokenify(&buffer, cmds);
+
 		/*
 		// diagnostic tool for printing the command token array
 		i=0;j=0;
@@ -143,9 +151,7 @@ int main(int argc, char **argv) {
 
 		// begin executing commands
 		i=0; j=0;
-		int exit=0;
-		pid_t pid=1;
-
+		
 		while (cmdtoks[i]!=NULL) {
 			if (cmdtoks[i][0]==NULL)
 				break;
@@ -204,14 +210,16 @@ int main(int argc, char **argv) {
 					int skip=0;
 					tmp = head;
 					while (tmp!=NULL) {
-						int size = strlen(tmp->name)+strlen(cmdtoks[i][0]);
+						int size = strlen(tmp->name)+strlen(cmdtoks[i][0])+2;
 						char *path = (char*) malloc(size);
 						strcpy(path, tmp->name);
 						strcat(path, "/");
 						strcat(path, cmdtoks[i][0]);
+						strcat(path, "\0");
 
-						if (execv(path, cmdtoks[i]) != -1){
+						if (execv(path, cmdtoks[i]) != -1) {
 							skip=1;
+							free(path);
 							break;
 						}
 
@@ -244,17 +252,20 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		// free heap memory
-		i=0; j=0;
-		while (cmdtoks[i]!=NULL) {
-			while (cmdtoks[i][j]!=NULL) {
-				free(cmdtoks[i][j]);
-				j++;
+		// free cmdtoks array
+		if (cmdtoks != NULL) {
+			i=0; j=0;
+			while (cmdtoks[i]!=NULL) {
+				j=0;
+				while (cmdtoks[i][j]!='\0') {
+					free(cmdtoks[i][j]);
+					j++;
+				}
+				free(cmdtoks[i]);
+				i++;
 			}
-			free(cmdtoks[i]);
-			i++;
+			free(cmdtoks);
 		}
-		free(cmdtoks);
 
 		if (exit)
 			break;
@@ -268,6 +279,9 @@ int main(int argc, char **argv) {
 	while (head!=NULL) {
 		tmp = head;
 		head = head->next;
+		if (tmp->name != NULL) {
+			free(tmp->name);
+		}
 		free(tmp);
 	}
 

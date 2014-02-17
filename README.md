@@ -1,6 +1,5 @@
-cosc301_proj02
+CS 301: Project 2
 ==============
-Matthew Brauner<br />
-Professor Sommers<br />
-Colgate University - COSC 301<br />
-Due: October 11, 2013
+Operating Systems<br />
+
+Objective: Build a simple command line interpreter/shell
